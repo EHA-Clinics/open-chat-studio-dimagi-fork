@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.channels.const import MESSAGE_TYPES
 from apps.channels.datamodels import TwilioMessage, WhatsAppMessage
@@ -315,7 +316,14 @@ class TestTurnio:
     @pytest.mark.django_db()
     @patch("apps.service_providers.messaging_service.TurnIOService.client")
     def test_attachment_links_attached_to_message(self, turnio_client, turnio_whatsapp_channel, experiment):
-        session = ExperimentSessionFactory.create(experiment_channel=turnio_whatsapp_channel, experiment=experiment)
+        # `send_message_to_user` is an ad hoc send: no inbound message, so the only proof
+        # the 24-hour window is open is the session's own last activity. Without it the
+        # send goes out as a template, where the links are swallowed into the body text.
+        session = ExperimentSessionFactory.create(
+            experiment_channel=turnio_whatsapp_channel,
+            experiment=experiment,
+            last_activity_at=timezone.now(),
+        )
         channel = WhatsappChannel(session.experiment, session.experiment_channel, session)
         files = FileFactory.create_batch(2)
         channel.send_message_to_user("Hi there", files=files)
@@ -331,6 +339,40 @@ class TestTurnio:
 {files[1].download_link(session.id)}
 """
         assert final_message == expected_final_message
+
+    @pytest.mark.django_db()
+    @patch("apps.service_providers.messaging_service.httpx.post")
+    @patch("apps.service_providers.messaging_service.TurnIOService.client")
+    def test_ad_hoc_send_outside_service_window_uses_template(
+        self, turnio_client, httpx_post, turnio_whatsapp_channel, experiment
+    ):
+        """A session with no recorded activity cannot prove the 24-hour window is
+        open, so an ad hoc send must go out as the configured template. A cold start
+        that silently posted free text would be dropped by WhatsApp."""
+        messaging_provider = turnio_whatsapp_channel.messaging_provider
+        messaging_provider.config = {
+            **messaging_provider.config,
+            "template_namespace": "test_namespace",
+            "template_name": "test_template",
+        }
+        messaging_provider.save()
+        httpx_post.return_value = Mock(status_code=200, json=lambda: {"messages": [{"id": "wamid.test"}]})
+
+        session = ExperimentSessionFactory.create(
+            experiment_channel=turnio_whatsapp_channel,
+            experiment=experiment,
+            last_activity_at=None,
+        )
+        channel = WhatsappChannel(session.experiment, session.experiment_channel, session)
+        channel.send_message_to_user("Hi there")
+
+        turnio_client.messages.send_text.assert_not_called()
+        template = httpx_post.call_args.kwargs["json"]["template"]
+        assert template["name"] == "test_template"
+        assert template["components"][-1] == {
+            "type": "body",
+            "parameters": [{"type": "text", "text": "Hi there"}],
+        }
 
 
 class TestMetaCloudApi:

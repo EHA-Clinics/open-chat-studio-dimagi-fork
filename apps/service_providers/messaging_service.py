@@ -37,6 +37,17 @@ logger = logging.getLogger("ocs.messaging")
 
 MEDIA_DOWNLOAD_TIMEOUT = 30
 
+# Turn.io template language codes: operators naturally write "english", the
+# API only accepts ISO codes. Unlisted values pass through lowercased.
+_TURN_LANGUAGE_CODES = {
+    "english": "en",
+    "hausa": "ha",
+    "french": "fr",
+    "arabic": "ar",
+    "portuguese": "pt",
+    "spanish": "es",
+}
+
 
 def _utf16_len(text: str) -> int:
     """Return the number of UTF-16 code units in `text`.
@@ -474,11 +485,117 @@ class TurnIOService(HttpMediaDownloadMixin, MessagingService):
 
     auth_token: pydantic.SecretStr
 
+    SERVICE_WINDOW_HOURS: ClassVar[int] = 24
+    TURN_API_BASE_URL: ClassVar[str] = "https://whatsapp.turn.io/v1"
+    TURN_API_TIMEOUT: ClassVar[int] = 30
+
+    # Cold-start template for out-of-window sends. Read from the provider's
+    # `config` JSON (MessagingProvider.config → TurnIOService(**config)) — set
+    # all four on the Turn.io provider row via Django admin/shell. Empty
+    # namespace/name means "no template configured": out-of-window sends then
+    # raise a clear error instead of failing obscurely at Turn.
+    # `template_header_param` fills the template's single header variable
+    # (e.g. the brand name); body variables come per-send (see below).
+    template_namespace: str = ""
+    template_name: str = ""
+    template_language: str = "en"
+    template_header_param: str = "AdhereBot"
+
     @property
     def client(self) -> "TurnClient":
         from turn import TurnClient  # noqa: PLC0415 - lazy: optional provider dep (Turn SDK)
 
         return TurnClient(token=self.auth_token.get_secret_value())
+
+    def _is_within_service_window(self, last_activity_at: datetime | None) -> bool:
+        """Check if the last user activity is within the WhatsApp 24-hour service window.
+        Returns False if last_activity_at is None (no activity = outside window, require template).
+        """
+        if last_activity_at is None:
+            return False
+        return (timezone.now() - last_activity_at) < timedelta(hours=self.SERVICE_WINDOW_HOURS)
+
+    def send_template_message(
+        self,
+        message: str,
+        from_: str,
+        to: str,
+        platform: ChannelPlatform,
+        template_params: list[str] | None = None,
+        template_language: str | None = None,
+        **kwargs,
+    ):
+        """Send the configured Turn.io template: header variable from provider
+        config, body variables from ``template_params`` (falling back to the
+        whole message as a single variable for single-param templates).
+
+        Posts the Cloud-API-style ``template`` object directly instead of the
+        bundled SDK's ``send_templated_message``: that helper still sends the
+        legacy ``hsm`` shape, which Turn's API rejects at schema validation
+        (``"#/type": Value is not allowed in enum``). Verified live 2026-09-22:
+        this shape passes validation; Turn answers -1 "template does not
+        exist" only when the template itself is missing/unapproved.
+
+        ``template_language`` overrides the configured language per send
+        (Hausa patients need the ``ha`` template version). Namespace
+        whitespace is stripped and plain-language names ("english") are mapped
+        to ISO codes ("en") defensively — the Turn API only accepts codes.
+        Raises ServiceWindowExpiredException when no template is configured,
+        or when Turn reports the template missing (code -1): approve it in
+        Turn.io and confirm namespace/name.
+        """
+        namespace = self.template_namespace.replace(" ", "")
+        raw_language = template_language or self.template_language
+        language = _TURN_LANGUAGE_CODES.get(raw_language.strip().lower(), raw_language.strip().lower())
+        if not namespace or not self.template_name:
+            raise ServiceWindowExpiredException(
+                "The 24-hour service window has expired and no Turn.io template is configured. "
+                "Set template_namespace/template_name (+ optional template_language) on the "
+                "Turn.io provider config and approve the template in Turn.io."
+            )
+        body_params = template_params if template_params else [message]
+        header_param = self.template_header_param.strip()
+        components = (
+            [{"type": "header", "parameters": [{"type": "text", "text": header_param}]}] if header_param else []
+        )
+        components.append(
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": param} for param in body_params],
+            }
+        )
+        data = {
+            "to": to,
+            "recipient_type": "individual",
+            "type": "template",
+            "template": {
+                "namespace": namespace,
+                "name": self.template_name,
+                "language": {"code": language, "policy": "deterministic"},
+                "components": components,
+            },
+        }
+        response = httpx.post(
+            f"{self.TURN_API_BASE_URL}/messages",
+            headers={
+                "Authorization": f"Bearer {self.auth_token.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+            json=data,
+            timeout=self.TURN_API_TIMEOUT,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        errors = body.get("errors", []) if isinstance(body, dict) else []
+        if response.status_code in (400, 404) and any(e.get("code") == -1 for e in errors):
+            raise ServiceWindowExpiredException(
+                f"The 24-hour service window has expired and the '{self.template_name}' template was not found. "
+                "Approve it in Turn.io and confirm template_namespace/template_name."
+            )
+        response.raise_for_status()
+        return body["messages"][0]["id"]
 
     def send_text_message(
         self,
@@ -489,7 +606,19 @@ class TurnIOService(HttpMediaDownloadMixin, MessagingService):
         last_activity_at: datetime | None = None,
         **kwargs,
     ):
+        if not self._is_within_service_window(last_activity_at):
+            logger.info("Service window expired, sending Turn.io template message instead of text")
+            return self.send_template_message(
+                message=message,
+                from_=from_,
+                to=to,
+                platform=platform,
+                template_params=kwargs.get("template_params"),
+                template_language=kwargs.get("template_language"),
+            )
+
         self.client.messages.send_text(to, message)
+        return None
 
     def send_voice_message(
         self,

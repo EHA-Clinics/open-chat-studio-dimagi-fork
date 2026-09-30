@@ -56,13 +56,26 @@ class WhatsappSender(ChannelSender):
     def _last_activity_at(self):
         return self._ctx.last_activity_at if self._ctx else None
 
-    def send_text(self, text: str, recipient: str) -> None:
+    # Cold-start WhatsApp template variables (e.g. stashed in session state
+    # by API callers) are threaded explicitly by ResponseSendingStage — see
+    # `supports_template_params`. Other platforms never receive the kwarg.
+    supports_template_params = True
+
+    def send_text(
+        self,
+        text: str,
+        recipient: str,
+        template_params: list[str] | None = None,
+        template_language: str | None = None,
+    ) -> None:
         self._service.send_text_message(
             message=text,
             from_=self._from,
             to=_resolve_recipient(self._ctx, recipient),
             platform=ChannelPlatform.WHATSAPP,
             last_activity_at=self._last_activity_at,
+            template_params=template_params,
+            template_language=template_language,
         )
 
     def send_voice(self, audio: SynthesizedAudio, recipient: str) -> None:

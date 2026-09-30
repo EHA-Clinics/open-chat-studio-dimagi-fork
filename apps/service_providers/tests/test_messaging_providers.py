@@ -1,6 +1,6 @@
 from datetime import timedelta
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 from urllib.parse import urlparse
 
 import httpx
@@ -14,7 +14,7 @@ from apps.channels.models import ChannelPlatform
 from apps.channels.tests.message_examples import turnio_messages
 from apps.chat.exceptions import ServiceWindowExpiredException
 from apps.service_providers.exceptions import MessageMediaError
-from apps.service_providers.messaging_service import MetaCloudAPIService, TwilioService
+from apps.service_providers.messaging_service import MetaCloudAPIService, TurnIOService, TwilioService
 from apps.service_providers.models import MessagingProvider, MessagingProviderType
 from apps.service_providers.speech_service import SynthesizedAudio
 
@@ -1099,3 +1099,230 @@ class TestMetaCloudAPIPhoneNumbers:
         assert numbers == [
             {"phone_number_id": "555", "number": None, "display": "not a number", "verified_name": "Odd"}
         ]
+
+
+class TestTurnIOServiceWindow:
+    """Tests for TurnIOService cold-start routing: free text inside the
+    24-hour window, configured Turn.io template outside it."""
+
+    def _make_service(self, **overrides):
+        params = {
+            "auth_token": "test_token",
+            "template_namespace": "test_namespace",
+            "template_name": "test_template",
+            "template_language": "en",
+        }
+        params.update(overrides)
+        return TurnIOService(**params)
+
+    def _mock_client(self, service):
+        mock_client = MagicMock()
+        patcher = patch.object(TurnIOService, "client", new_callable=PropertyMock, return_value=mock_client)
+        patcher.start()
+        return mock_client, patcher
+
+    def test_none_last_activity_is_outside_window(self):
+        assert self._make_service()._is_within_service_window(None) is False
+
+    def test_23_hours_ago_is_within_window(self):
+        last_activity = timezone.now() - timedelta(hours=23)
+        assert self._make_service()._is_within_service_window(last_activity) is True
+
+    def test_25_hours_ago_is_outside_window(self):
+        last_activity = timezone.now() - timedelta(hours=25)
+        assert self._make_service()._is_within_service_window(last_activity) is False
+
+    def test_in_window_sends_free_text(self):
+        service = self._make_service()
+        mock_client, patcher = self._mock_client(service)
+        try:
+            service.send_text_message(
+                message="hello",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=1),
+            )
+        finally:
+            patcher.stop()
+        mock_client.messages.send_text.assert_called_once_with("+2340000000000", "hello")
+        mock_client.messages.send_templated_message.assert_not_called()
+
+    def test_expired_window_posts_template_object(self):
+        """Out-of-window sends POST the Cloud-API-style template object (NOT the
+        SDK's legacy ``hsm`` shape, which Turn rejects at schema validation)."""
+        service = self._make_service()
+        with patch("apps.service_providers.messaging_service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"messages": [{"id": "wamid.test"}]},
+            )
+            message_id = service.send_text_message(
+                message="hello",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+            )
+        assert message_id == "wamid.test"
+        assert mock_post.call_count == 1
+        _, kwargs = mock_post.call_args
+        assert kwargs["json"] == {
+            "to": "+2340000000000",
+            "recipient_type": "individual",
+            "type": "template",
+            "template": {
+                "namespace": "test_namespace",
+                "name": "test_template",
+                "language": {"code": "en", "policy": "deterministic"},
+                "components": [
+                    {"type": "header", "parameters": [{"type": "text", "text": "AdhereBot"}]},
+                    {"type": "body", "parameters": [{"type": "text", "text": "hello"}]},
+                ],
+            },
+        }
+
+    def test_template_params_kwarg_becomes_body_variables(self):
+        """Explicit params (e.g. [name, meds] threaded from session state)
+        fill the body slots; header still comes from provider config."""
+        service = self._make_service()
+        with patch("apps.service_providers.messaging_service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"messages": [{"id": "wamid.test"}]},
+            )
+            service.send_text_message(
+                message="ignored body",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+                template_params=["Zainab", "Doxycycline 100mg"],
+            )
+        _, kwargs = mock_post.call_args
+        components = kwargs["json"]["template"]["components"]
+        assert components[0] == {
+            "type": "header",
+            "parameters": [{"type": "text", "text": "AdhereBot"}],
+        }
+        assert components[1] == {
+            "type": "body",
+            "parameters": [{"type": "text", "text": "Zainab"}, {"type": "text", "text": "Doxycycline 100mg"}],
+        }
+
+    def test_empty_header_param_omits_header_component(self):
+        """Headerless templates (e.g. the generic adherebot_message) send
+        body only — a header component would fail validation against them."""
+        service = self._make_service(template_header_param="")
+        with patch("apps.service_providers.messaging_service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"messages": [{"id": "wamid.test"}]},
+            )
+            service.send_text_message(
+                message="hello",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+            )
+        _, kwargs = mock_post.call_args
+        assert kwargs["json"]["template"]["components"] == [
+            {"type": "body", "parameters": [{"type": "text", "text": "hello"}]},
+        ]
+
+    def test_expired_window_without_template_config_raises(self):
+        service = self._make_service(template_namespace="", template_name="")
+        mock_client, patcher = self._mock_client(service)
+        try:
+            with (
+                patch("apps.service_providers.messaging_service.httpx.post") as mock_post,
+                pytest.raises(ServiceWindowExpiredException),
+            ):
+                service.send_text_message(
+                    message="hello",
+                    from_="+10000000000",
+                    to="+2340000000000",
+                    platform=ChannelPlatform.WHATSAPP,
+                    last_activity_at=timezone.now() - timedelta(hours=25),
+                )
+        finally:
+            patcher.stop()
+        mock_post.assert_not_called()
+        mock_client.messages.send_text.assert_not_called()
+
+    def test_template_missing_at_turn_raises_service_window_expired(self):
+        """Turn code -1 (template/namespace unknown) → actionable operator error."""
+        service = self._make_service()
+        turn_error_response = MagicMock(
+            status_code=400,
+            json=lambda: {"errors": [{"code": -1, "details": "The template specified does not exist"}]},
+        )
+        with (
+            patch(
+                "apps.service_providers.messaging_service.httpx.post",
+                return_value=turn_error_response,
+            ),
+            pytest.raises(ServiceWindowExpiredException, match="test_template"),
+        ):
+            service.send_text_message(
+                message="hello",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+            )
+
+    def test_template_config_normalization(self):
+        """Namespace whitespace stripped, plain language names mapped to codes."""
+        service = self._make_service(
+            template_namespace="b77c84ca-1d86-4b90-a3c9 adb84061fc4c",
+            template_name="refill_patient",
+            template_language="english",
+        )
+        with patch("apps.service_providers.messaging_service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"messages": [{"id": "wamid.test"}]},
+            )
+            service.send_text_message(
+                message="hello",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+            )
+        _, kwargs = mock_post.call_args
+        template = kwargs["json"]["template"]
+        assert kwargs["json"]["type"] == "template"
+        assert template["namespace"] == "b77c84ca-1d86-4b90-a3c9adb84061fc4c"
+        assert template["name"] == "refill_patient"
+        assert template["language"] == {"code": "en", "policy": "deterministic"}
+        assert template["components"][0] == {
+            "type": "header",
+            "parameters": [{"type": "text", "text": "AdhereBot"}],
+        }
+        assert template["components"][1] == {
+            "type": "body",
+            "parameters": [{"type": "text", "text": "hello"}],
+        }
+
+    def test_template_language_override_per_send(self):
+        """A per-send language (Hausa patient) overrides the configured one."""
+        service = self._make_service()
+        with patch("apps.service_providers.messaging_service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"messages": [{"id": "wamid.test"}]},
+            )
+            service.send_text_message(
+                message="sannu",
+                from_="+10000000000",
+                to="+2340000000000",
+                platform=ChannelPlatform.WHATSAPP,
+                last_activity_at=timezone.now() - timedelta(hours=25),
+                template_params=["Aisha", "sannu"],
+                template_language="ha",
+            )
+        _, kwargs = mock_post.call_args
+        assert kwargs["json"]["template"]["language"] == {"code": "ha", "policy": "deterministic"}
