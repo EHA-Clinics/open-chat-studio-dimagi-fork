@@ -124,7 +124,23 @@ class ResponseSendingStage(ProcessingStage):
         if not text:
             return
         try:
-            ctx.sender.send_text(text, recipient)
+            # Cold-start template variables ride the session state (API callers
+            # stash `template_params` (+ optional `template_language`) in
+            # session_data, merged into state before the send task runs).
+            # Only senders advertising `supports_template_params` receive the
+            # kwargs — every other platform keeps its existing two-arg call.
+            kwargs: dict = {}
+            if getattr(ctx.sender, "supports_template_params", False):
+                session = ctx.experiment_session
+                if session is not None:
+                    state = session.state or {}
+                    params = state.get("template_params")
+                    if isinstance(params, list) and all(isinstance(p, str) for p in params):
+                        kwargs["template_params"] = params
+                    language = state.get("template_language")
+                    if isinstance(language, str) and language.strip():
+                        kwargs["template_language"] = language
+            ctx.sender.send_text(text, recipient, **kwargs)
         except Exception as e:
             raise MessageDeliveryFailure(
                 e,
