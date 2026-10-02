@@ -107,16 +107,16 @@ The system SHALL document a post-migrate bootstrap checklist that operators exec
 - **WHEN** bootstrap is complete
 - **THEN** the Django `Site` domain equals `ocs-dev.eha.ng` (or the configured public hostname)
 
-### Requirement: Object storage companion Terraform
-The system SHALL document OCS object storage as companion infrastructure in `eHealthAfrica/eha-cloud-devops` at `terraform/clinics-dev-ocs-storage/` (GCS buckets for public media, private media, and WhatsApp audio; service account; S3-interop HMAC). That Terraform MUST NOT live in `open-chat-studio`. Enabling `USE_S3_STORAGE` in OCS Vault MAY be deferred until media or WhatsApp voice is required; the provision path and Vault key mapping SHALL still be documented as part of this Clinics deploy plan.
+### Requirement: Object storage Terraform and CI in this repository
+The system SHALL provision OCS object storage from `terraform/clinics-dev-ocs-storage/` in this repository (GCS buckets for public media, private media, and WhatsApp audio; service account; S3-interop HMAC), applied by the dedicated Clinics OCS storage GitHub Actions workflow using WIF on `clinics-dev-359913`. Enabling `USE_S3_STORAGE` in OCS Vault MAY be deferred until media or WhatsApp voice is required; the provision path and Vault key mapping SHALL still be documented as part of this Clinics deploy plan.
 
-#### Scenario: Hosting doc names the Terraform path
+#### Scenario: Hosting doc names the in-repo Terraform and workflow
 - **WHEN** an operator reads Clinics hosting / cutover docs for OCS object storage
-- **THEN** they are directed to `eha-cloud-devops/terraform/clinics-dev-ocs-storage/` and the three bucket → OCS env mappings
+- **THEN** they are directed to `terraform/clinics-dev-ocs-storage/` and `.github/workflows/clinics-ocs-storage.yml` with the three bucket → OCS env mappings
 
 #### Scenario: Admin smoke without S3
 - **WHEN** OCS is first brought up for admin smoke only
-- **THEN** `USE_S3_STORAGE` is not required to be true, even if the companion Terraform stack already exists or has been applied
+- **THEN** `USE_S3_STORAGE` is not required to be true, even if the storage Terraform stack already exists or has been applied
 
 ### Requirement: AdhereBot URL documented
 The system SHALL document AdhereBot → OCS base URL as `https://ocs-dev.eha.ng` by default, with an optional later in-cluster Service DNS alternative for same-cluster traffic.

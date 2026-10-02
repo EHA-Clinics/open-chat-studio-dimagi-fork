@@ -19,8 +19,8 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
 **Non-Goals:**
 - Deploying in-cluster Postgres/pgvector StatefulSet or CNPG from Helm.
 - Memorystore Redis for v1 (Bitnami Redis chart is enough unless platform prefers Memorystore later).
-- Enabling `USE_S3_STORAGE` / media uploads for v1 admin smoke — optional until WhatsApp media / voice / user uploads are required (bucket **provisioning** is in scope via companion Terraform).
-- Putting object-storage Terraform inside `open-chat-studio` — it lives in `eha-cloud-devops`.
+- Enabling `USE_S3_STORAGE` / media uploads for v1 admin smoke — optional until WhatsApp media / voice / user uploads are required (bucket **provisioning** is in scope in this repo via Terraform + GHA).
+- Putting object-storage Terraform in `eha-cloud-devops` — it belongs in **this** repository.
 - Splitting Celery into multiple queue-specific workers (Dimagi ECS style) for clinics-dev.
 - Replacing Heroku/ECS for non-Clinics.
 - Meta WABA bootstrap in CI.
@@ -91,8 +91,8 @@ These steps are **manual** (or one-shot Jobs), not CI — but they are required 
 - **Default for docs:** `OCS_BASE_URL=https://ocs-dev.eha.ng` (same Ingress humans use).
 - **Optional later:** in-cluster Service DNS (`http://<ocs-web-svc>.ocs-dev.svc.cluster.local`) for AdhereBot-only traffic; not required for v1 cutover.
 
-### 8. Object storage — companion Terraform in eha-cloud-devops
-- **Choice:** Provision OCS GCS buckets from **`eHealthAfrica/eha-cloud-devops`** stack `terraform/clinics-dev-ocs-storage/` (not this app repo). OCS talks S3-compat via HMAC against `https://storage.googleapis.com`.
+### 8. Object storage — Terraform + GHA in this repository
+- **Choice:** Provision OCS GCS buckets from **`terraform/clinics-dev-ocs-storage/`** in this repo, applied by **`.github/workflows/clinics-ocs-storage.yml`** using WIF against project **`clinics-dev-359913`** (Environment `dev`). OCS talks S3-compat via HMAC against `https://storage.googleapis.com`.
 - **Buckets (OCS env 1:1):**
   | Bucket (default name) | OCS env |
   |---|---|
@@ -100,8 +100,9 @@ These steps are **manual** (or one-shot Jobs), not CI — but they are required 
   | `clinics-dev-359913-ocs-private` | `AWS_PRIVATE_STORAGE_BUCKET_NAME` |
   | `clinics-dev-359913-ocs-whatsapp-audio` | `WHATSAPP_S3_AUDIO_BUCKET` |
 - **Also creates:** `ocs-storage` SA, objectAdmin on those buckets, optional `allUsers` objectViewer on public, HMAC key → Vault as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
-- **Apply timing:** Terraform may be applied anytime in clinics-dev. Wiring `USE_S3_STORAGE=True` + bucket/HMAC keys into OCS Vault is **optional for admin smoke**; required before durable media / WhatsApp voice.
-- **Docs:** Clinics hosting doc MUST point at that Terraform path and `vault_env_snippet` outputs.
+- **CI:** `plan` on PRs that touch the Terraform path; `apply` only via `workflow_dispatch`. Impersonated SA needs storage/IAM permissions + access to state bucket `clinics-dev-359913-terraform-state` (prefix `open-chat-studio/ocs-storage`).
+- **Apply timing:** Run the storage workflow anytime. Wiring `USE_S3_STORAGE=True` + bucket/HMAC keys into OCS Vault is **optional for admin smoke**; required before durable media / WhatsApp voice.
+- **Docs:** Clinics hosting doc MUST point at the in-repo Terraform path and the storage workflow.
 
 ## Risks / Trade-offs
 
@@ -119,7 +120,7 @@ These steps are **manual** (or one-shot Jobs), not CI — but they are required 
 2. Deploy Redis + app releases (may be unhealthy until DB URL exists).
 3. On Cloud SQL `eha-clinics-dev` (`POSTGRES_14`): create dedicated OCS database/user; `CREATE EXTENSION vector`; write full required Vault keys at `https://vault-dev.eha.ng` under `kv/ehaclinics/dev/...`.
 4. Confirm Secret sync + migrate Job; run bootstrap checklist (superuser, Team, Site); smoke HTTPS admin + `/status/`.
-5. When media/WhatsApp is needed: `terraform apply` in `eha-cloud-devops/terraform/clinics-dev-ocs-storage/`, write HMAC + bucket env to Vault, set `USE_S3_STORAGE=True`, rollout OCS.
+5. When media/WhatsApp is needed: run **Clinics OCS storage (Terraform)** workflow `apply` in this repo, write HMAC + bucket env to Vault, set `USE_S3_STORAGE=True`, rollout OCS.
 6. Point AdhereBot at `https://ocs-dev.eha.ng` (or in-cluster URL later); deprecate dimagi-ocs deploy as default.
 
 ## Open Questions

@@ -10,9 +10,10 @@
   - Dedicated OCS DB/user + `CREATE EXTENSION vector` **when ready**
   - Vault at `https://vault-dev.eha.ng` with the **full required key list** (`DJANGO_SETTINGS_MODULE`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CRYPTOGRAPHY_KEY`, `CRYPTOGRAPHY_SALT`, email keys or explicit `ACCOUNT_EMAIL_VERIFICATION=none`, optional `HEALTH_CHECK_TOKENS`)
   - DNS `ocs-dev.eha.ng`, Traefik TLS / proxy notes for Django
-  - Object storage: companion Terraform in `eha-cloud-devops/terraform/clinics-dev-ocs-storage/` (three GCS buckets + HMAC); `USE_S3_STORAGE` optional until media/WhatsApp
+  - Object storage: in-repo `terraform/clinics-dev-ocs-storage/` + `.github/workflows/clinics-ocs-storage.yml` (WIF → `clinics-dev-359913`); `USE_S3_STORAGE` optional until media/WhatsApp
 - [ ] 1.5 Document cutover order and verify it is written down: Redis+apps → create DB on `eha-clinics-dev` → fill Vault → migrate → **bootstrap** (createsuperuser, Team, Site=`ocs-dev.eha.ng`) → smoke admin + `/status/` → optional AdhereBot `OCS_BASE_URL`
-- [ ] 1.6 Confirm `eha-cloud-devops/terraform/clinics-dev-ocs-storage/` exists (public/private/WhatsApp buckets + SA + HMAC outputs) and document `terraform apply` + Vault key mapping in Clinics hosting doc; verify doc links that path
+- [ ] 1.6 Ensure Terraform state bucket `clinics-dev-359913-terraform-state` exists and WIF deploy SA has storage/IAM roles for OCS buckets + HMAC; document required roles in Clinics hosting doc
+- [ ] 1.7 Add `terraform/clinics-dev-ocs-storage/` (public/private/WhatsApp buckets + SA + HMAC) and `.github/workflows/clinics-ocs-storage.yml` (plan on PR / apply on dispatch) and verify workflow parses; document Vault mapping of outputs
 
 ## 2. Pipeline and caller in this repo
 
@@ -33,7 +34,7 @@
 
 - [ ] 4.1 Note that `dimagi-ocs` custom chart / in-cluster Postgres is not used on this path and verify the note is present
 - [ ] 4.2 Document manual bootstrap commands (createsuperuser, Team, Site domain) and AdhereBot → **OCS** URL options (`OCS_BASE_URL=https://ocs-dev.eha.ng` default; optional in-cluster Service to OCS) and verify they appear in the Clinics deploy doc
-- [ ] 4.3 Document object-storage companion path: apply `eha-cloud-devops/terraform/clinics-dev-ocs-storage/`, map outputs to Vault (`USE_S3_STORAGE`, bucket names, HMAC, `AWS_S3_ENDPOINT_URL`), and verify when media/WhatsApp is required this checklist is followed
+- [ ] 4.3 Document object-storage path: run **Clinics OCS storage (Terraform)** workflow `apply`, map outputs to Vault (`USE_S3_STORAGE`, bucket names, HMAC, `AWS_S3_ENDPOINT_URL`), and verify when media/WhatsApp is required this checklist is followed
 - [ ] 4.4 Smoke-test checklist: HTTPS admin login, Redis, Cloud SQL after Vault fill, migrate, `/status/`, CSRF login behind Traefik — verify linked from Clinics deploy doc
 
 ## 5. Validation
