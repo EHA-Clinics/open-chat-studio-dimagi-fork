@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines Clinics GKE workload packaging for Open Chat Studio: **generic3** for app processes, **Bitnami Redis only** as an extra chart, **existing Cloud SQL `eha-clinics-dev`** for Postgres, and **Vault-backed** runtime credentials.
+Defines Clinics GKE workload packaging for Open Chat Studio: **generic3** for app processes, **Bitnami Redis only** as an extra chart, **existing Cloud SQL `eha-clinics-dev` (`POSTGRES_14`, `clinics-dev-359913:europe-west1:eha-clinics-dev`)** for Postgres, and **Vault-backed** runtime credentials.
 
 ## ADDED Requirements
 
@@ -25,15 +25,19 @@ The system SHALL provide Redis for Celery/cache by deploying a **Bitnami Redis**
 - **THEN** they can connect to the configured Redis URL
 
 ### Requirement: Existing Cloud SQL instance for Postgres
-The system SHALL use the existing Cloud SQL instance `eha-clinics-dev` in GCP project `clinics-dev-359913` as the PostgreSQL server for OCS (dedicated database/role, separate from AdhereBot), including Cloud SQL Auth Proxy wiring on app components when using private IP connectivity.
+The system SHALL use the existing Cloud SQL instance **`eha-clinics-dev`** in GCP project **`clinics-dev-359913`**, region **`europe-west1`**, engine **`POSTGRES_14`**, connection name **`clinics-dev-359913:europe-west1:eha-clinics-dev`**, as the PostgreSQL server for Open Chat Studio. The application SHALL use a **dedicated** database and role on that shared instance (recommended names `open_chat_studio` / matching role), separate from AdhereBot and other tenants. App components SHALL connect via Cloud SQL Auth Proxy when `database.instance` is set on generic3. The system MUST NOT provision a second Cloud SQL instance or an in-cluster Postgres chart for this Clinics path.
 
 #### Scenario: Values point at eha-clinics-dev
 - **WHEN** generic3 database settings for web/worker/beat are rendered
 - **THEN** they reference instance `clinics-dev-359913:europe-west1:eha-clinics-dev` (or the documented equivalent connection path to that instance)
 
+#### Scenario: Dedicated OCS database on the shared instance
+- **WHEN** operators prepare Postgres for the first successful migrate
+- **THEN** a dedicated database and role exist on `eha-clinics-dev` for OCS only, and `CREATE EXTENSION vector` has been applied in that database
+
 #### Scenario: Credentials may be supplied after first deploy scaffolding
 - **WHEN** Helm releases are installed before Vault/DB credentials are populated
-- **THEN** the system still allows operators to add `DATABASE_URL` (and related keys) later via Vault/Secret update without changing the chart identity
+- **THEN** the system still allows operators to add `DATABASE_URL` (and related keys) later via Vault (`vault-dev.eha.ng`) / Secret update without changing the chart identity or Cloud SQL instance
 
 ### Requirement: Vault-backed runtime secrets
 The system SHALL load runtime secrets (including database credentials, Django `SECRET_KEY`, cryptography keys, and other provider keys) through Kubernetes Secrets populated from **Vault** using generic3-supported Vault Static Secrets / env-from-Secret wiring (`vaultextrasecrets` / `env_secrets` or equivalent documented Clinics mechanism). Values files in git MUST NOT contain plaintext credentials.

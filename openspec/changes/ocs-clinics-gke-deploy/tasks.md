@@ -4,8 +4,8 @@
 
 - [ ] 1.1 Document WIF binding for `eHealthAfrica/open-chat-studio` on clinics-dev and verify Environment `dev` can list `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`
 - [ ] 1.2 Confirm pinned eha-workflow ref includes `eha-clinics-dev-gke` and verify resolve names that cluster
-- [ ] 1.3 Document Cloud SQL instance `eha-clinics-dev` (project `clinics-dev-359913`): create OCS DB/user + pgvector **when ready**, Vault path/key list for `DATABASE_URL` and app secrets, DNS `ocs-dev.eha.ng` in `docs/hosting/clinics-gke.md` (or equivalent) and verify the doc exists
-- [ ] 1.4 Document that first deploy may precede Vault credential fill, and verify the cutover order (Redis+apps → Vault DB creds → migrate → smoke) is written down
+- [ ] 1.3 Document the **chosen Postgres target** in `docs/hosting/clinics-gke.md` (or equivalent) and verify the doc exists: Cloud SQL `eha-clinics-dev` (`POSTGRES_14`, `clinics-dev-359913:europe-west1:eha-clinics-dev`), create dedicated OCS DB/user + `CREATE EXTENSION vector` **when ready**, Vault at `https://vault-dev.eha.ng` with path/key list for `DATABASE_URL` and app secrets, DNS `ocs-dev.eha.ng`
+- [ ] 1.4 Document that first deploy may precede Vault credential fill, and verify the cutover order (Redis+apps → create DB on `eha-clinics-dev` → Vault DB creds → migrate → smoke) is written down
 
 ## 2. Pipeline and caller in this repo
 

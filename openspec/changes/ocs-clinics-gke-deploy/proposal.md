@@ -9,7 +9,13 @@ Open Chat Studio must run on EHA Clinics GKE (`clinics-dev-359913` / `eha-clinic
 - Add OpenSpec planning (this change) and, on apply, an eha-workflow **caller** + `deployments/dev.pipeline.yaml` in **this repo**.
 - Deploy OCS **app** workloads with **`eha-chart/generic3` version `0.5.7`** (multi-release: web, celery-worker, celery-beat).
 - Deploy **Redis only** as an additional Helm chart (Bitnami Redis via eha-workflow `helm_charts`) — **no in-cluster Postgres chart**.
-- Use the **existing Cloud SQL** instance [`eha-clinics-dev`](https://console.cloud.google.com/sql/instances/eha-clinics-dev/overview?project=clinics-dev-359913) in project `clinics-dev-359913` for the OCS database (dedicated DB/user; pgvector as required by OCS). **DB credentials are supplied later** via Vault → Kubernetes Secrets after/during cutover (not committed to git).
+- Use the **existing shared Cloud SQL** Postgres for OCS (verified suitable; dedicated DB/user still to create):
+  - Console: [`eha-clinics-dev`](https://console.cloud.google.com/sql/instances/eha-clinics-dev/overview?project=clinics-dev-359913)
+  - Project / region: `clinics-dev-359913` / `europe-west1`
+  - Engine: **POSTGRES_14** (meets OCS PostgreSQL 14+ / Cloud SQL pgvector support)
+  - Connection name (Auth Proxy): `clinics-dev-359913:europe-west1:eha-clinics-dev`
+  - App database: create dedicated DB + role (e.g. `open_chat_studio`) on that instance — do **not** reuse AdhereBot or other app DBs; enable `CREATE EXTENSION vector`
+  - **DB credentials are supplied later** via Vault (`vault-dev.eha.ng` / `kv/ehaclinics/dev/...`) → Kubernetes Secrets (not committed to git)
 - Wire runtime secrets through **generic3 Vault Static Secrets / `env_secrets`** (same Clinics pattern as AdhereBot) so `DATABASE_URL`, Django keys, LLM keys, etc. can be updated in Vault without chart or image changes.
 - Target cluster **`eha-clinics-dev-gke`**, namespace **`ocs-dev`**, registry **`eu.gcr.io/clinics-dev-359913`**, Ingress **`ocs-dev.eha.ng`**.
 - Treat `EHA-Clinics/dimagi-ocs` as Clinics **ops/companion**; not the primary install chart. **BREAKING (ops):** supersedes `dimagi-ocs` `deploy-ocs-helm.yml` as the default Clinics path.
@@ -31,5 +37,5 @@ Open Chat Studio must run on EHA Clinics GKE (`clinics-dev-359913` / `eha-clinic
 - **This repo:** `openspec/`, later `.github/workflows/deploy.yaml`, `deployments/`; non-Clinics hosts unchanged.
 - **`EHA-Clinics/dimagi-ocs`:** companion only; custom in-cluster Postgres templates are out of scope for this path.
 - **`eha-workflow`:** needs `eha-clinics-dev-gke` on the pinned workflow repo.
-- **GCP:** reuse Cloud SQL `eha-clinics-dev`; add OCS DB/user when ready; chart-deploy Redis; DNS; Traefik TLS; WIF; Vault paths for credentials.
+- **GCP:** reuse Cloud SQL `eha-clinics-dev` (`POSTGRES_14`, connection `clinics-dev-359913:europe-west1:eha-clinics-dev`); add dedicated OCS DB/user + pgvector when ready; chart-deploy Redis; DNS; Traefik TLS; WIF; Vault (`vault-dev.eha.ng`) paths for credentials.
 - **AdhereBot:** later `OCS_BASE_URL=https://ocs-dev.eha.ng`.

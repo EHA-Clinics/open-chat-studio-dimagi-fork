@@ -2,7 +2,9 @@
 
 ## Context
 
-See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `eha-chart/generic3@0.5.7` with Cloud SQL and Vault-synced secrets (`vaultextrasecrets` / `env_secrets`). Cloud SQL instance **`eha-clinics-dev`** already exists in `clinics-dev-359913`. Operators will add OCS DB credentials after deploy scaffolding is live.
+See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `eha-chart/generic3@0.5.7` with Cloud SQL and Vault-synced secrets (`vaultextrasecrets` / `env_secrets`).
+
+**Postgres target (verified live on clinics-dev):** Cloud SQL instance **`eha-clinics-dev`** — `POSTGRES_14`, `europe-west1`, connection name `clinics-dev-359913:europe-west1:eha-clinics-dev`, tier `db-custom-2-3840`, shared multi-app instance (many existing DBs; no OCS DB yet). Cluster Vault UI is **`https://vault-dev.eha.ng`**. Operators create the OCS DB/user + Vault `DATABASE_URL` after deploy scaffolding is live.
 
 ## Goals / Non-Goals
 
@@ -26,10 +28,19 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
 - **Why:** OCS needs Redis for Celery; Postgres is already provided by Cloud SQL. No second Postgres in the cluster.
 - **Not used from charts:** any Postgres/pgvector StatefulSet (including dimagi-ocs chart data plane).
 
-### 2. Postgres = Cloud SQL `eha-clinics-dev`
-- **Choice:** `database.instance: clinics-dev-359913:europe-west1:eha-clinics-dev` on generic3 values (Cloud SQL Auth Proxy sidecar). App reads `DATABASE_URL` (or equivalent) from a K8s Secret.
-- **Credentials timing:** First deploys MAY ship with Secret placeholders or omit Ready until Vault is filled; operator creates DB/user + writes Vault keys **later**, then VSO/rollout picks them up — no requirement to commit secrets in the apply PR.
-- **pgvector:** Enable/confirm on this instance when creating the OCS database (OCS requires it); out-of-band SQL/ops step.
+### 2. Postgres = Cloud SQL `eha-clinics-dev` (POSTGRES_14)
+- **Choice:** Reuse the existing instance — not a new Cloud SQL server and not an in-cluster Postgres chart.
+  | Field | Value |
+  |---|---|
+  | Instance | [`eha-clinics-dev`](https://console.cloud.google.com/sql/instances/eha-clinics-dev/overview?project=clinics-dev-359913) |
+  | Project | `clinics-dev-359913` |
+  | Region | `europe-west1` |
+  | `databaseVersion` | `POSTGRES_14` |
+  | Connection name | `clinics-dev-359913:europe-west1:eha-clinics-dev` |
+  | generic3 wiring | `database.instance` → Auth Proxy sidecar on web/worker/beat |
+  | App DB/role | Dedicated (recommended name `open_chat_studio`); separate from AdhereBot and other tenants on this instance |
+- **Credentials timing:** First deploys MAY ship with Secret placeholders or omit Ready until Vault is filled; operator creates DB/user + writes Vault keys **later** (Vault UI `https://vault-dev.eha.ng`, path under `kv/ehaclinics/dev/...`), then VSO/rollout picks them up — no requirement to commit secrets in the apply PR.
+- **pgvector:** On the OCS database run `CREATE EXTENSION IF NOT EXISTS vector;` (Cloud SQL PG14 supports pgvector; confirm extension ≥ 0.7 if halfvec is used). Out-of-band SQL/ops step before migrate.
 
 ### 3. Vault credentials (yes — chart supports it)
 - **Choice:** Use generic3 **`vaultextrasecrets`** (+ **`env_secrets`**) exactly as Clinics apps do (e.g. AdhereBot): values name Vault paths and Secret names; pods consume env from synced Secrets.
@@ -57,7 +68,7 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
 
 1. Merge this OpenSpec; apply pipeline/values (Vault paths declared, secrets empty or stub).
 2. Deploy Redis + app releases (may be unhealthy until DB URL exists).
-3. Create OCS database/user on Cloud SQL `eha-clinics-dev`; enable pgvector; write credentials to Vault.
+3. On Cloud SQL `eha-clinics-dev` (`POSTGRES_14`): create dedicated OCS database/user; `CREATE EXTENSION vector`; write `DATABASE_URL` to Vault at `https://vault-dev.eha.ng` under `kv/ehaclinics/dev/...`.
 4. Confirm Secret sync + migrate Job; smoke test.
 5. Point AdhereBot at `https://ocs-dev.eha.ng`; deprecate dimagi-ocs deploy as default.
 
