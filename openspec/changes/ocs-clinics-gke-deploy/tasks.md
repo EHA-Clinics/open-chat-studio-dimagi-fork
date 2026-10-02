@@ -4,7 +4,7 @@
 
 - [ ] 1.1 Document WIF binding for `eHealthAfrica/open-chat-studio` on clinics-dev and verify Environment `dev` can list `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`
 - [ ] 1.2 Confirm pinned eha-workflow ref includes `eha-clinics-dev-gke` and verify resolve names that cluster
-- [ ] 1.3 Create `develop` for Clinics continuous deploy (or document temporary `main` + dispatch) and verify pipeline `git_branch` matches
+- [x] 1.3 Create `develop` for Clinics continuous deploy (branch exists on `eHealthAfrica/open-chat-studio`; OpenSpec PR targets `develop`) — still verify pipeline `git_branch` matches at apply
 - [ ] 1.4 Document in `docs/hosting/clinics-gke.md` (or equivalent) and verify the doc exists:
   - Cloud SQL `eha-clinics-dev` (`POSTGRES_14`, `clinics-dev-359913:europe-west1:eha-clinics-dev`)
   - Dedicated OCS DB/user + `CREATE EXTENSION vector` **when ready**

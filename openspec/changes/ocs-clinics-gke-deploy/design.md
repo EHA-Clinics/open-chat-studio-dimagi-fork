@@ -75,7 +75,7 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
 ### 5. Namespace / hostname / migrate / branch
 - Namespace `ocs-dev`, host **`ocs-dev.eha.ng`** (admin UI + future channel webhooks).
 - Migrate Job with same image tag; gate web success on migrate.
-- **Git branch:** Create and use **`develop`** for Clinics continuous deploy (`git_branch: develop`), matching AdhereBot; keep `workflow_dispatch` for `dev`. Until `develop` exists, document temporary `main` + dispatch only — do not leave branch ambiguous at apply.
+- **Git branch:** Use **`develop`** for Clinics continuous deploy (`git_branch: develop`), matching AdhereBot; keep `workflow_dispatch` for `dev`. **`develop` exists** on `eHealthAfrica/open-chat-studio` (created from `main`); this OpenSpec change merges into `develop`.
 - **Health probes:** Web readiness/liveness (or Clinics equivalent) SHOULD hit `/status/?token=...` when `HEALTH_CHECK_TOKENS` is set.
 
 ### 6. Post-migrate bootstrap (manual cutover — still planned here)
@@ -115,7 +115,7 @@ These steps are **manual** (or one-shot Jobs), not CI — but they are required 
 
 ## Migration Plan
 
-1. Merge this OpenSpec; apply pipeline/values (Vault paths declared, secrets empty or stub); ensure `develop` exists or temporary branch mapping is documented.
+1. Merge this OpenSpec into **`develop`**; apply pipeline/values (Vault paths declared, secrets empty or stub).
 2. Deploy Redis + app releases (may be unhealthy until DB URL exists).
 3. On Cloud SQL `eha-clinics-dev` (`POSTGRES_14`): create dedicated OCS database/user; `CREATE EXTENSION vector`; write full required Vault keys at `https://vault-dev.eha.ng` under `kv/ehaclinics/dev/...`.
 4. Confirm Secret sync + migrate Job; run bootstrap checklist (superuser, Team, Site); smoke HTTPS admin + `/status/`.

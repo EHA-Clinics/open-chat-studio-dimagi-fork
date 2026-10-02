@@ -20,7 +20,7 @@ Open Chat Studio must run on EHA Clinics GKE (`clinics-dev-359913` / `eha-clinic
 - Target cluster **`eha-clinics-dev-gke`**, namespace **`ocs-dev`**, registry **`eu.gcr.io/clinics-dev-359913`**, OCS Ingress hostname **`ocs-dev.eha.ng`** (OCS admin UI + future OCS webhooks — not AdhereBot’s hostname).
 - Document cutover **bootstrap** (manual): `createsuperuser`, create Team, set Django `Site` to `ocs-dev.eha.ng`; probes on `/status/`; image build-arg `OCS_VERSION`; single Celery worker (all queues).
 - Scope **object storage companion infra** in `eHealthAfrica/eha-cloud-devops` at `terraform/clinics-dev-ocs-storage/` (GCS buckets + SA + HMAC for OCS S3 interop). Not in this app repo. Enabling `USE_S3_STORAGE` in OCS Vault can wait until media/WhatsApp uploads are needed; the Terraform stack is the documented provision path.
-- Use **`develop`** for Clinics continuous deploy (create if missing) + `workflow_dispatch`; keep Dimagi ECS `deploy.yml` untouched (add a separate Clinics caller).
+- Use **`develop`** for Clinics continuous deploy + `workflow_dispatch` (`develop` already exists on this remote); keep Dimagi ECS `deploy.yml` untouched (add a separate Clinics caller).
 - Treat `EHA-Clinics/dimagi-ocs` as Clinics **ops/companion**; not the primary install chart. **BREAKING (ops):** supersedes `dimagi-ocs` `deploy-ocs-helm.yml` as the default Clinics path.
 - Document WIF for **`eHealthAfrica/open-chat-studio`** (clinics-dev pool today was bootstrapped for `EHA-Clinics` owner-only).
 
