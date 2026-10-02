@@ -13,19 +13,24 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
 - App processes on **generic3**; **only Redis** as an extra Helm chart dependency.
 - **Postgres = existing Cloud SQL `eha-clinics-dev`** (not chart-owned Postgres).
 - Secrets via **Vault → K8s Secret**, referenced from generic3 values (credentials can land later).
+- Admin UI reachable at HTTPS `ocs-dev.eha.ng` with CSRF/hosts/email/bootstrap documented so the app is usable after cutover.
 - Clarify dimagi-ocs as companion, not primary chart.
 
 **Non-Goals:**
 - Deploying in-cluster Postgres/pgvector StatefulSet or CNPG from Helm.
 - Memorystore Redis for v1 (Bitnami Redis chart is enough unless platform prefers Memorystore later).
+- Object storage (S3/GCS) for v1 admin smoke — **deferred** until WhatsApp media / voice / user uploads are required.
+- Splitting Celery into multiple queue-specific workers (Dimagi ECS style) for clinics-dev.
 - Replacing Heroku/ECS for non-Clinics.
 - Meta WABA bootstrap in CI.
+- Automating AdhereBot `OCS_BASE_URL` cutover in this change (document only).
 
 ## Decisions
 
 ### 1. App chart = generic3; datastore chart = Redis only
 - **Choice:** `eha-chart/generic3` `0.5.7` for web / celery-worker / celery-beat. **Bitnami Redis** under eha-workflow `helm_charts` for broker/cache.
 - **Why:** OCS needs Redis for Celery; Postgres is already provided by Cloud SQL. No second Postgres in the cluster.
+- **Celery topology:** One worker release **without** `-Q` (consumes all declared queues). OCS documents that single-worker setups are supported; Dimagi’s multi-worker ECS split is not required for clinics-dev.
 - **Not used from charts:** any Postgres/pgvector StatefulSet (including dimagi-ocs chart data plane).
 
 ### 2. Postgres = Cloud SQL `eha-clinics-dev` (POSTGRES_14)
@@ -41,38 +46,73 @@ See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `
   | App DB/role | Dedicated (recommended name `open_chat_studio`); separate from AdhereBot and other tenants on this instance |
 - **Credentials timing:** First deploys MAY ship with Secret placeholders or omit Ready until Vault is filled; operator creates DB/user + writes Vault keys **later** (Vault UI `https://vault-dev.eha.ng`, path under `kv/ehaclinics/dev/...`), then VSO/rollout picks them up — no requirement to commit secrets in the apply PR.
 - **pgvector:** On the OCS database run `CREATE EXTENSION IF NOT EXISTS vector;` (Cloud SQL PG14 supports pgvector; confirm extension ≥ 0.7 if halfvec is used). Out-of-band SQL/ops step before migrate.
+- **`DATABASE_URL`:** Include Cloud SQL–compatible TLS (`sslmode=require` or as required by proxy/sidecar docs).
 
-### 3. Vault credentials (yes — chart supports it)
+### 3. Vault credentials + required runtime env
 - **Choice:** Use generic3 **`vaultextrasecrets`** (+ **`env_secrets`**) exactly as Clinics apps do (e.g. AdhereBot): values name Vault paths and Secret names; pods consume env from synced Secrets.
-- **Typical keys (illustrative, not committed):** `DATABASE_URL`, `SECRET_KEY`, `CRYPTOGRAPHY_KEY`, `CRYPTOGRAPHY_SALT`, email/LLM keys, `REDIS_URL` if not composed from in-cluster Redis auth Secret.
+- **Required keys (must be listed in Clinics hosting doc + Vault path; values never in git):**
+  | Key | Purpose |
+  |---|---|
+  | `DJANGO_SETTINGS_MODULE` | `config.settings_production` |
+  | `SECRET_KEY` | Django secret |
+  | `DATABASE_URL` | Cloud SQL OCS DB via Auth Proxy |
+  | `REDIS_URL` | Bitnami Redis (or composed from Redis auth Secret) |
+  | `DJANGO_ALLOWED_HOSTS` | `ocs-dev.eha.ng` (plus any internal probe hosts if needed) |
+  | `CSRF_TRUSTED_ORIGINS` | `https://ocs-dev.eha.ng` (required behind Traefik) |
+  | `CRYPTOGRAPHY_KEY` | Field encryption (set explicitly; do not rely on `SECRET_KEY` alone) |
+  | `CRYPTOGRAPHY_SALT` | Field encryption salt |
+  | `HEALTH_CHECK_TOKENS` | Token(s) for `/status/` probes (optional but recommended) |
+- **Email (required decision for usable admin):** Prefer a real backend (Mailgun or SES) in Vault. For a closed clinics-dev pilot only, `ACCOUNT_EMAIL_VERIFICATION=none` MAY be set explicitly and documented as temporary — default upstream is `mandatory`, which blocks invite/signup without email.
+- **TLS / proxy:** Traefik terminates TLS. Values/docs MUST set Django appropriately so login/CSRF work behind the Ingress (e.g. disable app-level forced redirect if TLS is only at the edge, or keep redirect consistent with Clinics apps). Document the chosen pattern next to AdhereBot.
 - **Why:** Updating Vault updates the Secret and can trigger rollout; Helm values stay non-secret.
-- **Alternative:** Manual `kubectl apply` of a Secret — allowed as bootstrap, but Vault is the documented steady state.
 
-### 4. Workflow pin + WIF
+### 4. Workflow pin + WIF + image version
 - Prefer pin with `eha-clinics-dev-gke` (e.g. `EHA-Clinics/eha-workflow@v15.0.5-clinics` or upstream after cluster merge).
 - Extend WIF so `eHealthAfrica/open-chat-studio` can impersonate the clinics deploy SA.
+- **Image build:** Pass Docker build-arg **`OCS_VERSION`** (e.g. `git describe --tags --match 'v*' --always`) so the running app reports a real version (Dockerfile defaults to `unknown`).
 
 ### 5. Namespace / hostname / migrate / branch
-- Namespace `ocs-dev`, host `ocs-dev.eha.ng`.
+- Namespace `ocs-dev`, host **`ocs-dev.eha.ng`** (admin UI + future channel webhooks).
 - Migrate Job with same image tag; gate web success on migrate.
-- `git_branch: develop` + `workflow_dispatch` for `dev`.
+- **Git branch:** Create and use **`develop`** for Clinics continuous deploy (`git_branch: develop`), matching AdhereBot; keep `workflow_dispatch` for `dev`. Until `develop` exists, document temporary `main` + dispatch only — do not leave branch ambiguous at apply.
+- **Health probes:** Web readiness/liveness (or Clinics equivalent) SHOULD hit `/status/?token=...` when `HEALTH_CHECK_TOKENS` is set.
+
+### 6. Post-migrate bootstrap (manual cutover — still planned here)
+After DB credentials exist and migrate succeeds, operators MUST (checklist in hosting doc):
+1. `createsuperuser` (exec into web pod or one-shot Job).
+2. Create a **Team** in Django admin (app is not usable without a team).
+3. Set Django **`Site`** domain to `ocs-dev.eha.ng` (public links / host-bound features otherwise 403).
+4. Configure LLM providers / channels in admin as needed for the pilot.
+
+These steps are **manual** (or one-shot Jobs), not CI — but they are required for “runs properly” and belong in the cutover checklist.
+
+### 7. AdhereBot → OCS URL
+- **Default for docs:** `OCS_BASE_URL=https://ocs-dev.eha.ng` (same Ingress humans use).
+- **Optional later:** in-cluster Service DNS (`http://<ocs-web-svc>.ocs-dev.svc.cluster.local`) for AdhereBot-only traffic; not required for v1 cutover.
+
+### 8. Object storage deferred
+- v1 admin UI + API smoke do **not** require `USE_S3_STORAGE`. Before WhatsApp voice/media or user uploads, provision S3-compatible storage and add keys to Vault — out of scope for initial apply.
 
 ## Risks / Trade-offs
 
 - **[Risk] Pods CrashLoop until Vault/DB creds exist** → Mitigation: document ordered cutover (deploy Redis + apps → create DB/user → fill Vault → restart/rollout); optional initial dry-run / scaled-to-zero until secrets present.
 - **[Risk] WIF denies eHealthAfrica owner** → Mitigation: update pool binding before first deploy.
 - **[Risk] pgvector missing on Cloud SQL** → Mitigation: ops checklist before migrate.
+- **[Risk] Admin unusable after green pods** → Mitigation: bootstrap checklist (superuser, Team, Site, email/CSRF).
+- **[Risk] CSRF/login failures behind Traefik** → Mitigation: require `CSRF_TRUSTED_ORIGINS` + hosts + proxy/TLS settings in Vault/values.
 - **[Trade-off] Bitnami Redis vs Memorystore** → Start Bitnami in `ocs-dev`; swap `REDIS_URL` via Vault later if Memorystore is provisioned.
+- **[Trade-off] Email none vs real backend** → Prefer real email; `none` only for closed pilot with explicit doc note.
 
 ## Migration Plan
 
-1. Merge this OpenSpec; apply pipeline/values (Vault paths declared, secrets empty or stub).
+1. Merge this OpenSpec; apply pipeline/values (Vault paths declared, secrets empty or stub); ensure `develop` exists or temporary branch mapping is documented.
 2. Deploy Redis + app releases (may be unhealthy until DB URL exists).
-3. On Cloud SQL `eha-clinics-dev` (`POSTGRES_14`): create dedicated OCS database/user; `CREATE EXTENSION vector`; write `DATABASE_URL` to Vault at `https://vault-dev.eha.ng` under `kv/ehaclinics/dev/...`.
-4. Confirm Secret sync + migrate Job; smoke test.
-5. Point AdhereBot at `https://ocs-dev.eha.ng`; deprecate dimagi-ocs deploy as default.
+3. On Cloud SQL `eha-clinics-dev` (`POSTGRES_14`): create dedicated OCS database/user; `CREATE EXTENSION vector`; write full required Vault keys at `https://vault-dev.eha.ng` under `kv/ehaclinics/dev/...`.
+4. Confirm Secret sync + migrate Job; run bootstrap checklist (superuser, Team, Site); smoke HTTPS admin + `/status/`.
+5. Point AdhereBot at `https://ocs-dev.eha.ng` (or in-cluster URL later); deprecate dimagi-ocs deploy as default.
 
 ## Open Questions
 
 - Exact eha-workflow pin (Clinics fork vs upstream) — resolve at apply if both register `eha-clinics-dev-gke`.
 - Vault mount/path naming for OCS (`ehaclinics/dev/open-chat-studio` vs similar) — choose at apply to match Clinics Vault layout.
+- Email provider for clinics-dev (Mailgun vs SES vs temporary `ACCOUNT_EMAIL_VERIFICATION=none`).
