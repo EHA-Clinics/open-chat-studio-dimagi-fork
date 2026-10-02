@@ -7,17 +7,20 @@ Open Chat Studio must run on EHA Clinics GKE (`clinics-dev-359913` / `eha-clinic
 ## What Changes
 
 - Add OpenSpec planning (this change) and, on apply, an eha-workflow **caller** + `deployments/dev.pipeline.yaml` in **this repo**.
-- Deploy OCS workloads with **`eha-chart/generic3` version `0.5.7`** from `https://ehealthafrica.github.io/helm-charts/` (multi-release: web, celery-worker, celery-beat; Redis via Bitnami or Memorystore).
-- Target cluster registry key **`eha-clinics-dev-gke`**, namespace **`ocs-dev`**, registry **`eu.gcr.io/clinics-dev-359913`**, Ingress host **`ocs-dev.eha.ng`**.
-- Treat `EHA-Clinics/dimagi-ocs` as the Clinics **ops/packaging companion** (existing custom chart + secrets examples). This plan **does not** use that custom chart as the primary install vehicle; apply may optionally vendor reference values from it. **BREAKING (ops):** supersedes `dimagi-ocs` `deploy-ocs-helm.yml` as the default deploy path for Clinics.
-- Document WIF: this repo is under **`eHealthAfrica`**, so clinics-dev WIF must allow `repository_owner == eHealthAfrica` (or a repo-scoped principal) — today’s Clinics pool was bootstrapped for `EHA-Clinics` only.
+- Deploy OCS **app** workloads with **`eha-chart/generic3` version `0.5.7`** (multi-release: web, celery-worker, celery-beat).
+- Deploy **Redis only** as an additional Helm chart (Bitnami Redis via eha-workflow `helm_charts`) — **no in-cluster Postgres chart**.
+- Use the **existing Cloud SQL** instance [`eha-clinics-dev`](https://console.cloud.google.com/sql/instances/eha-clinics-dev/overview?project=clinics-dev-359913) in project `clinics-dev-359913` for the OCS database (dedicated DB/user; pgvector as required by OCS). **DB credentials are supplied later** via Vault → Kubernetes Secrets after/during cutover (not committed to git).
+- Wire runtime secrets through **generic3 Vault Static Secrets / `env_secrets`** (same Clinics pattern as AdhereBot) so `DATABASE_URL`, Django keys, LLM keys, etc. can be updated in Vault without chart or image changes.
+- Target cluster **`eha-clinics-dev-gke`**, namespace **`ocs-dev`**, registry **`eu.gcr.io/clinics-dev-359913`**, Ingress **`ocs-dev.eha.ng`**.
+- Treat `EHA-Clinics/dimagi-ocs` as Clinics **ops/companion**; not the primary install chart. **BREAKING (ops):** supersedes `dimagi-ocs` `deploy-ocs-helm.yml` as the default Clinics path.
+- Document WIF for **`eHealthAfrica/open-chat-studio`** (clinics-dev pool today was bootstrapped for `EHA-Clinics` owner-only).
 
 ## Capabilities
 
 ### New Capabilities
 
 - `ocs-eha-workflow-deploy`: Caller workflow + pipeline in `open-chat-studio` that builds the OCS image and deploys via eha-workflow to `eha-clinics-dev-gke`.
-- `ocs-generic3-clinics-workloads`: generic3 (and Redis) values/process mapping for web, celery worker, celery beat, migrate gate, Cloud SQL/pgvector, Ingress, and secrets for Clinics `ocs-dev`.
+- `ocs-generic3-clinics-workloads`: generic3 app releases + Bitnami Redis only; Cloud SQL `eha-clinics-dev`; Vault-backed secrets; Ingress for Clinics `ocs-dev`.
 
 ### Modified Capabilities
 
@@ -25,8 +28,8 @@ Open Chat Studio must run on EHA Clinics GKE (`clinics-dev-359913` / `eha-clinic
 
 ## Impact
 
-- **This repo:** `openspec/`, later `.github/workflows/deploy.yaml`, `deployments/`; no change to OCS product behavior for non-Clinics hosts (Heroku/ECS remain).
-- **`EHA-Clinics/dimagi-ocs`:** custom chart remains available but is not the primary Clinics install path under this plan.
-- **`eha-workflow`:** requires `clusters/eha-clinics-dev-gke.yaml` on the workflow repo that this caller pins (upstream and/or Clinics fork).
-- **GCP:** Cloud SQL DB `open_chat_studio` + pgvector, Redis, DNS, Traefik TLS, Environment secrets for WIF.
-- **AdhereBot:** later points `OCS_BASE_URL` at `https://ocs-dev.eha.ng`.
+- **This repo:** `openspec/`, later `.github/workflows/deploy.yaml`, `deployments/`; non-Clinics hosts unchanged.
+- **`EHA-Clinics/dimagi-ocs`:** companion only; custom in-cluster Postgres templates are out of scope for this path.
+- **`eha-workflow`:** needs `eha-clinics-dev-gke` on the pinned workflow repo.
+- **GCP:** reuse Cloud SQL `eha-clinics-dev`; add OCS DB/user when ready; chart-deploy Redis; DNS; Traefik TLS; WIF; Vault paths for credentials.
+- **AdhereBot:** later `OCS_BASE_URL=https://ocs-dev.eha.ng`.

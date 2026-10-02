@@ -2,29 +2,30 @@
 
 ## 1. Platform prerequisites (document + configure)
 
-- [ ] 1.1 Document WIF binding for `eHealthAfrica/open-chat-studio` on clinics-dev (extend pool condition or repo principal) and verify Environment `dev` can list `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`
-- [ ] 1.2 Confirm pinned eha-workflow ref includes `eha-clinics-dev-gke` (Clinics fork tag or upstream after merge) and verify resolve against that ref names the cluster
-- [ ] 1.3 Document Cloud SQL DB/user + pgvector, Redis choice, DNS `ocs-dev.eha.ng`, and Secret/Vault key list in `docs/hosting/clinics-gke.md` (or equivalent) and verify the doc exists
+- [ ] 1.1 Document WIF binding for `eHealthAfrica/open-chat-studio` on clinics-dev and verify Environment `dev` can list `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`
+- [ ] 1.2 Confirm pinned eha-workflow ref includes `eha-clinics-dev-gke` and verify resolve names that cluster
+- [ ] 1.3 Document Cloud SQL instance `eha-clinics-dev` (project `clinics-dev-359913`): create OCS DB/user + pgvector **when ready**, Vault path/key list for `DATABASE_URL` and app secrets, DNS `ocs-dev.eha.ng` in `docs/hosting/clinics-gke.md` (or equivalent) and verify the doc exists
+- [ ] 1.4 Document that first deploy may precede Vault credential fill, and verify the cutover order (Redis+apps → Vault DB creds → migrate → smoke) is written down
 
 ## 2. Pipeline and caller in this repo
 
-- [ ] 2.1 Add `deployments/dev.pipeline.yaml` (`service_name`, `git_branch: develop`, `image_registry: clinics-dev-359913`, `cluster: eha-clinics-dev-gke`, `namespace: ocs-dev`, `chart_version: "0.5.7"`, build component for web image, services for web/worker/beat/+redis) and verify YAML is valid and file names match values
-- [ ] 2.2 Add `.github/workflows/deploy.yaml` calling pinned `build-deploy.yaml` with `secrets: inherit` (push `develop` + `workflow_dispatch`) and verify workflow parses
-- [ ] 2.3 Create `develop` branch tracking policy (or document dispatch-only until created) and verify trigger mapping matches `git_branch`
+- [ ] 2.1 Add `deployments/dev.pipeline.yaml` with generic3 app components (web/worker/beat), **Bitnami Redis only** under `helm_charts` (no Postgres chart), `cluster: eha-clinics-dev-gke`, `namespace: ocs-dev`, `chart_version: "0.5.7"` and verify YAML is valid
+- [ ] 2.2 Add `.github/workflows/deploy.yaml` calling pinned `build-deploy.yaml` with `secrets: inherit` and verify workflow parses
+- [ ] 2.3 Create or document `develop` / `workflow_dispatch` mapping and verify it matches `git_branch`
 
-## 3. generic3 values and migrate
+## 3. generic3 values, Redis, Vault, migrate
 
-- [ ] 3.1 Add `deployments/dev/web.yaml` (gunicorn, port 8000, Ingress `ocs-dev.eha.ng`, Traefik/cert-manager, Cloud SQL proxy, secret refs) and verify `helm template` with `eha-chart/generic3` `0.5.7` succeeds
-- [ ] 3.2 Add `deployments/dev/celery-worker.yaml` and `celery-beat.yaml` (beat replicas=1) and verify `helm template` succeeds for both
-- [ ] 3.3 Add Redis Bitnami values or Memorystore-only `REDIS_URL` documentation and verify worker values reference the broker
-- [ ] 3.4 Add migrate Job/manifest wired into the pipeline and verify dry-run apply or pipeline reference exists
+- [ ] 3.1 Add `deployments/dev/web.yaml` with Cloud SQL instance `clinics-dev-359913:europe-west1:eha-clinics-dev`, Ingress `ocs-dev.eha.ng`, and `vaultextrasecrets` / `env_secrets` stubs (no plaintext secrets) and verify `helm template` against generic3 `0.5.7` succeeds
+- [ ] 3.2 Add `celery-worker.yaml` and `celery-beat.yaml` (beat replicas=1) sharing Vault/Secret contract and verify `helm template` succeeds
+- [ ] 3.3 Add `deployments/dev/redis.yaml` (Bitnami) and verify worker/web values can form or reference `REDIS_URL`
+- [ ] 3.4 Add migrate Job wired to the pipeline and verify dry-run or pipeline reference exists (runs once DB Secret is present)
 
 ## 4. Companion repo and docs
 
-- [ ] 4.1 Add a short note in Clinics deploy doc that `EHA-Clinics/dimagi-ocs` custom chart/`deploy-ocs-helm.yml` is not the primary path and verify the note is present
-- [ ] 4.2 Extend smoke-test checklist (HTTPS admin, migrate, Redis, WhatsApp webhook URL shape) and verify checklist is linked from the Clinics deploy doc
+- [ ] 4.1 Note that `dimagi-ocs` custom chart / in-cluster Postgres is not used on this path and verify the note is present
+- [ ] 4.2 Smoke-test checklist: HTTPS, Redis, Cloud SQL connect after Vault fill, migrate, webhook URL shape — verify linked from Clinics deploy doc
 
 ## 5. Validation
 
 - [ ] 5.1 Run `openspec validate ocs-clinics-gke-deploy --strict` and verify it passes
-- [ ] 5.2 After apply merge, run Deploy for `dev` and verify logs show `chart: eha-chart/generic3` and `chart_version: 0.5.7` with cluster `eha-clinics-dev-gke`
+- [ ] 5.2 After apply, verify deploy logs show generic3 for apps, a Redis chart component, cluster `eha-clinics-dev-gke`, and no Postgres Helm chart install

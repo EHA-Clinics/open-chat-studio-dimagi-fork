@@ -2,63 +2,66 @@
 
 ## Context
 
-See `proposal.md`. This repo already has a production `Dockerfile` and Compose/ECS deploy paths. Clinics GKE deploy for AdhereBot uses `EHA-Clinics/eha-workflow` + `eha-chart/generic3@0.5.7` on `eha-clinics-dev-gke`. `EHA-Clinics/dimagi-ocs` holds a custom umbrella chart and a hand-rolled Helm GHA; that OpenSpec PR was closed so planning lives here (deploy-from app repo).
+See `proposal.md`. Clinics AdhereBot already uses `EHA-Clinics/eha-workflow` + `eha-chart/generic3@0.5.7` with Cloud SQL and Vault-synced secrets (`vaultextrasecrets` / `env_secrets`). Cloud SQL instance **`eha-clinics-dev`** already exists in `clinics-dev-359913`. Operators will add OCS DB credentials after deploy scaffolding is live.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - Clinics install path owned by `open-chat-studio` CI (build SHA = deploy SHA).
-- Use eha-workflow + generic3 0.5.7 multi-release (web / worker / beat).
-- Align with AdhereBot networking (Traefik, Cloud SQL preference, WIF).
+- App processes on **generic3**; **only Redis** as an extra Helm chart dependency.
+- **Postgres = existing Cloud SQL `eha-clinics-dev`** (not chart-owned Postgres).
+- Secrets via **Vault → K8s Secret**, referenced from generic3 values (credentials can land later).
 - Clarify dimagi-ocs as companion, not primary chart.
 
 **Non-Goals:**
-- Replacing Heroku/ECS/Dimagi AWS deploy for non-Clinics environments.
-- Implementing Meta WABA / experiment bootstrap in CI.
-- Multi-region HA.
+- Deploying in-cluster Postgres/pgvector StatefulSet or CNPG from Helm.
+- Memorystore Redis for v1 (Bitnami Redis chart is enough unless platform prefers Memorystore later).
+- Replacing Heroku/ECS for non-Clinics.
+- Meta WABA bootstrap in CI.
 
 ## Decisions
 
-### 1. Primary chart = generic3 (not dimagi-ocs umbrella)
-- **Choice:** `eha-chart/generic3` `0.5.7` with one Helm release per process.
-- **Why:** Matches Clinics platform and prior direction; eha-workflow’s default for `build_components`; avoids maintaining a parallel umbrella chart as the install source of truth in two repos.
-- **Alternative:** Helm-upgrade `EHA-Clinics/dimagi-ocs` `charts/open-chat-studio` after image build — rejected as primary (duplicates platform chart concerns; weaker fit to eha-workflow component matrix). dimagi-ocs chart may remain for reference/experiments.
+### 1. App chart = generic3; datastore chart = Redis only
+- **Choice:** `eha-chart/generic3` `0.5.7` for web / celery-worker / celery-beat. **Bitnami Redis** under eha-workflow `helm_charts` for broker/cache.
+- **Why:** OCS needs Redis for Celery; Postgres is already provided by Cloud SQL. No second Postgres in the cluster.
+- **Not used from charts:** any Postgres/pgvector StatefulSet (including dimagi-ocs chart data plane).
 
-### 2. Workflow repository pin
-- **Choice:** Prefer pin that already contains `eha-clinics-dev-gke`: `EHA-Clinics/eha-workflow@v15.0.5-clinics` (or newer). If org policy requires calling `eHealthAfrica/eha-workflow`, merge upstream cluster registration first and pin that tag.
-- **Why:** This repo is `eHealthAfrica/*` (can call upstream eha-workflow once cluster exists); Clinics fork already has the cluster entry and action retargets. Either works if WIF trusts this repo.
-- **WIF:** Extend clinics-dev pool condition / SA binding to allow `eHealthAfrica/open-chat-studio` (today’s bootstrap was `EHA-Clinics` owner-only).
+### 2. Postgres = Cloud SQL `eha-clinics-dev`
+- **Choice:** `database.instance: clinics-dev-359913:europe-west1:eha-clinics-dev` on generic3 values (Cloud SQL Auth Proxy sidecar). App reads `DATABASE_URL` (or equivalent) from a K8s Secret.
+- **Credentials timing:** First deploys MAY ship with Secret placeholders or omit Ready until Vault is filled; operator creates DB/user + writes Vault keys **later**, then VSO/rollout picks them up — no requirement to commit secrets in the apply PR.
+- **pgvector:** Enable/confirm on this instance when creating the OCS database (OCS requires it); out-of-band SQL/ops step.
 
-### 3. Namespace and hostname
-- **Choice:** Namespace `ocs-dev`, host `ocs-dev.eha.ng` (consistent with dimagi-ocs docs and Clinics `*-dev.eha.ng`).
+### 3. Vault credentials (yes — chart supports it)
+- **Choice:** Use generic3 **`vaultextrasecrets`** (+ **`env_secrets`**) exactly as Clinics apps do (e.g. AdhereBot): values name Vault paths and Secret names; pods consume env from synced Secrets.
+- **Typical keys (illustrative, not committed):** `DATABASE_URL`, `SECRET_KEY`, `CRYPTOGRAPHY_KEY`, `CRYPTOGRAPHY_SALT`, email/LLM keys, `REDIS_URL` if not composed from in-cluster Redis auth Secret.
+- **Why:** Updating Vault updates the Secret and can trigger rollout; Helm values stay non-secret.
+- **Alternative:** Manual `kubectl apply` of a Secret — allowed as bootstrap, but Vault is the documented steady state.
 
-### 4. Data plane
-- **Choice:** Cloud SQL instance `eha-clinics-dev` + dedicated DB/user + pgvector; Cloud SQL Auth Proxy via generic3 `database.instance`. Redis: Bitnami chart in `ocs-dev` unless Memorystore exists.
-- **Alternative:** In-cluster Postgres from dimagi-ocs chart — fallback only.
+### 4. Workflow pin + WIF
+- Prefer pin with `eha-clinics-dev-gke` (e.g. `EHA-Clinics/eha-workflow@v15.0.5-clinics` or upstream after cluster merge).
+- Extend WIF so `eHealthAfrica/open-chat-studio` can impersonate the clinics deploy SA.
 
-### 5. Migrate
-- **Choice:** Kubernetes Job (pipeline `kubectl:` or pre-deploy) with same image tag running `python manage.py migrate --noinput`, gated before/with web success criteria.
-- **Alternative:** Init container — weaker.
-
-### 6. Branch mapping
-- **Choice:** `deployments/dev.pipeline.yaml` with `git_branch: develop` (create `develop` if missing) + `workflow_dispatch` for `dev`.
+### 5. Namespace / hostname / migrate / branch
+- Namespace `ocs-dev`, host `ocs-dev.eha.ng`.
+- Migrate Job with same image tag; gate web success on migrate.
+- `git_branch: develop` + `workflow_dispatch` for `dev`.
 
 ## Risks / Trade-offs
 
-- **[Risk] WIF denies eHealthAfrica owner** → Mitigation: update attribute_condition / principalSet before first deploy.
-- **[Risk] Upstream eha-workflow lacks clinics cluster** → Mitigation: pin Clinics fork or merge `eHealthAfrica/eha-workflow` PR registering the cluster.
-- **[Risk] generic3 command/args for Celery** → Mitigation: validate with `helm template` against 0.5.7; adjust values.
-- **[Trade-off] dimagi-ocs custom chart unused as primary** → Ops docs there need a deprecation note when this path ships.
+- **[Risk] Pods CrashLoop until Vault/DB creds exist** → Mitigation: document ordered cutover (deploy Redis + apps → create DB/user → fill Vault → restart/rollout); optional initial dry-run / scaled-to-zero until secrets present.
+- **[Risk] WIF denies eHealthAfrica owner** → Mitigation: update pool binding before first deploy.
+- **[Risk] pgvector missing on Cloud SQL** → Mitigation: ops checklist before migrate.
+- **[Trade-off] Bitnami Redis vs Memorystore** → Start Bitnami in `ocs-dev`; swap `REDIS_URL` via Vault later if Memorystore is provisioned.
 
 ## Migration Plan
 
-1. Land this OpenSpec PR; review; merge.
-2. Apply: add pipeline, values, caller; fix WIF for this repo; Cloud SQL/Redis/DNS/secrets.
-3. Push `develop` / dispatch `dev`; smoke test.
-4. Point AdhereBot `OCS_BASE_URL` at `https://ocs-dev.eha.ng`.
-5. Deprecate dimagi-ocs deploy workflow as default.
+1. Merge this OpenSpec; apply pipeline/values (Vault paths declared, secrets empty or stub).
+2. Deploy Redis + app releases (may be unhealthy until DB URL exists).
+3. Create OCS database/user on Cloud SQL `eha-clinics-dev`; enable pgvector; write credentials to Vault.
+4. Confirm Secret sync + migrate Job; smoke test.
+5. Point AdhereBot at `https://ocs-dev.eha.ng`; deprecate dimagi-ocs deploy as default.
 
 ## Open Questions
 
-- Exact eha-workflow pin (Clinics fork vs upstream after cluster merge) — resolve at apply without changing specs if both expose `eha-clinics-dev-gke`.
-- Memorystore availability in `clinics-dev-359913`.
+- Exact eha-workflow pin (Clinics fork vs upstream) — resolve at apply if both register `eha-clinics-dev-gke`.
+- Vault mount/path naming for OCS (`ehaclinics/dev/open-chat-studio` vs similar) — choose at apply to match Clinics Vault layout.
