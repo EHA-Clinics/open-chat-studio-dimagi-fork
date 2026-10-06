@@ -1,0 +1,28 @@
+# Clinics GKE deploy via EHA-Clinics/eha-workflow.
+# Does not replace Dimagi ECS .github/workflows/deploy.yml.
+
+name: Deploy Clinics
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy (defaults to the branch mapping)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  deployments: write
+
+jobs:
+  deploy:
+    uses: EHA-Clinics/eha-workflow/.github/workflows/build-deploy.yaml@v15.0.5-clinics
+    secrets: inherit
+    with:
+      environment: ${{ inputs.environment || '' }}
+      # Clinics Vault (VSO / build secrets), not vault.eha.im
+      vault_addr: https://vault-dev.eha.ng

@@ -1,0 +1,52 @@
+# Dev pipeline for Open Chat Studio on eha-clinics-dev.
+# `git_branch` selects this file; the filename stem is the release suffix
+# (e.g. open-chat-studio-web-dev).
+
+service_name: open-chat-studio
+git_branch: develop
+
+image_registry: clinics-dev-359913
+
+helm_repos:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+
+helm_charts:
+  defaults:
+    chart_version: "0.5.7"
+
+  redis:
+    chart: bitnami/redis
+    chart_version: "17.3.5"
+
+# Same Dockerfile for all app processes (separate image names/tags per component).
+# Pass OCS_VERSION when the build supports it; see docs/hosting/clinics-gke.md.
+build_components:
+  web:
+    dockerfile: Dockerfile
+    docker_context: .
+  celery-worker:
+    dockerfile: Dockerfile
+    docker_context: .
+  celery-beat:
+    dockerfile: Dockerfile
+    docker_context: .
+  migrate:
+    dockerfile: Dockerfile
+    docker_context: .
+
+deployment:
+  cluster: eha-clinics-dev-gke
+  namespace: ocs-dev
+  values_dir: deployments/dev
+  services:
+    redis:
+      - redis.yaml
+    migrate:
+      - migrate.yaml
+    web:
+      - web.yaml
+    celery-worker:
+      - celery-worker.yaml
+    celery-beat:
+      - celery-beat.yaml

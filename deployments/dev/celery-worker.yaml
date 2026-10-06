@@ -1,0 +1,93 @@
+# generic3 — Celery worker (all queues; no -Q).
+# See docs/hosting/clinics-gke.md
+
+replicaCount: 1
+
+nameOverride: celery-worker
+fullnameOverride: ocs-celery-worker
+
+image:
+  repository: eu.gcr.io/clinics-dev-359913/open-chat-studio-celery-worker
+  pullPolicy: Always
+
+podAntiAffinity:
+  enabled: false
+
+app:
+  name: celery-worker
+  port: 8000
+  secret: open-chat-studio
+  minAvailable: 0
+  scaling:
+    enabled: false
+  args:
+    - celery
+    - -A
+    - config
+    - worker
+    - -l
+    - INFO
+    - --pool
+    - threads
+    - --concurrency
+    - "20"
+  probe:
+    type: exec
+    path: /tmp
+    initialDelaySeconds: 30
+    periodSeconds: 60
+    timeout: "10"
+    livenessProbeScriptName: celery-live.sh
+    readinessProbeScriptName: celery-ready.sh
+    livenessProbeScript: |
+      #!/bin/bash
+      exit 0
+    readinessProbeScript: |
+      #!/bin/bash
+      exit 0
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512M
+    limits:
+      cpu: 2000m
+      memory: 4096M
+  db:
+    create: false
+    enabled: true
+    host: 127.0.0.1
+    user: open_chat_studio
+    name: open_chat_studio
+    secret: database-credentials
+
+database:
+  instance: clinics-dev-359913:europe-west1:eha-clinics-dev
+
+extra_env_vars:
+  DJANGO_SETTINGS_MODULE: config.settings_production
+
+env_secrets:
+  enabled: true
+  name: open-chat-studio
+
+vaultextrasecrets:
+  enabled: true
+  rolloutrestart: true
+  secrets:
+    - name: open-chat-studio
+      path: ehaclinics/dev/open-chat-studio
+    - name: database-credentials
+      path: ehaclinics/dev/open-chat-studio/database-credentials
+    - name: cloudsql-instance-credentials
+      path: ehaclinics/dev/open-chat-studio/cloudsql-instance-credentials
+
+nginx:
+  enabled: false
+
+ingress:
+  enabled: false
+
+service:
+  type: ClusterIP
+  externalPort: 80
+  internalPort: 8000
