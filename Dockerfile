@@ -94,10 +94,12 @@ RUN chown django:django -R static_root
 
 USER django
 
-# Supplied by CI as `git describe --tags --match 'v*' --always`. `.git` is not
-# in the build context (see .dockerignore), so this cannot be derived here.
-# Deliberately last: the version changes on every build, so an earlier ENV
-# would invalidate the apt, dependency and collectstatic layers every time.
+# Supplied by CI as `--build-arg OCS_VERSION=...` (e.g. `git describe --tags
+# --match 'v*' --always`). `.git` is not in the build context (see .dockerignore).
+# Clinics/eha-workflow tags images with the git SHA; until the reusable workflow
+# injects that SHA as OCS_VERSION, set runtime `OCS_VERSION` in Vault if needed
+# (see docs/hosting/clinics-gke.md). Deliberately last so version churn does not
+# invalidate apt/dependency/collectstatic layers.
 ARG OCS_VERSION=unknown
 ENV OCS_VERSION=${OCS_VERSION}
 

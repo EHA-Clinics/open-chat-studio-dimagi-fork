@@ -99,6 +99,7 @@ parameter (`?token=...`).
 - [Kamal](./kamal.md) — deploy Docker containers to any server via SSH with zero-downtime deploys
 - [Heroku](./heroku.md) — Platform-as-a-Service with minimal infrastructure management
 - [AWS Fargate](./aws.md) — container-native deployment on AWS, with full automation via `ocs-deploy`
+- [Clinics GKE](./clinics-gke.md) — EHA Clinics `eha-clinics-dev` via eha-workflow + generic3
 - [Zero Trust Access](./zero_trust_access.md) — expose the app without opening inbound ports, using Cloudflare Tunnel or similar tools
 
 ## First-time Setup

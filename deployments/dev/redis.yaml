@@ -1,0 +1,24 @@
+# Bitnami Redis for Celery broker / Django cache (ocs-dev).
+# Point REDIS_URL in Vault at this release once the Service name is known
+# (typically redis-master.ocs-dev.svc.cluster.local:6379 when auth is disabled).
+
+fullnameOverride: "redis"
+
+image:
+  pullPolicy: IfNotPresent
+  registry: docker.io
+  repository: bitnamilegacy/redis
+  tag: 7.2.5
+
+auth:
+  enabled: false
+
+architecture: standalone
+
+master:
+  persistence:
+    enabled: true
+    size: 8Gi
+
+replica:
+  replicaCount: 0
