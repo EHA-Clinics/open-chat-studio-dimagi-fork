@@ -386,9 +386,7 @@ class TurnIOMessagingConfigForm(ObfuscatingMixin, ProviderTypeConfigForm):
         namespace = cleaned_data.get("template_namespace") or ""
         name = cleaned_data.get("template_name") or ""
         if bool(namespace) != bool(name):
-            raise forms.ValidationError(
-                _("Template namespace and name must be set together, or both left blank.")
-            )
+            raise forms.ValidationError(_("Template namespace and name must be set together, or both left blank."))
         return cleaned_data
 
 

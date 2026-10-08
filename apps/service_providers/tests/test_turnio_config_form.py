@@ -88,9 +88,7 @@ class TestTurnIOTemplateFields:
         assert form.cleaned_data["template_header_param"] == "AdhereBot"
 
     def test_blank_language_defaults_to_en(self):
-        form = TurnIOMessagingConfigForm(
-            None, data={"auth_token": "token123", "template_language": "  "}
-        )
+        form = TurnIOMessagingConfigForm(None, data={"auth_token": "token123", "template_language": "  "})
         assert form.is_valid(), form.errors
         assert form.cleaned_data["template_language"] == "en"
 
@@ -109,16 +107,12 @@ class TestTurnIOTemplateFields:
         assert form.cleaned_data["template_header_param"] == ""
 
     def test_namespace_without_name_is_rejected(self):
-        form = TurnIOMessagingConfigForm(
-            None, data={"auth_token": "token123", "template_namespace": "ns-uuid"}
-        )
+        form = TurnIOMessagingConfigForm(None, data={"auth_token": "token123", "template_namespace": "ns-uuid"})
         assert not form.is_valid()
         assert "__all__" in form.errors
 
     def test_name_without_namespace_is_rejected(self):
-        form = TurnIOMessagingConfigForm(
-            None, data={"auth_token": "token123", "template_name": "refill_patient"}
-        )
+        form = TurnIOMessagingConfigForm(None, data={"auth_token": "token123", "template_name": "refill_patient"})
         assert not form.is_valid()
         assert "__all__" in form.errors
 
