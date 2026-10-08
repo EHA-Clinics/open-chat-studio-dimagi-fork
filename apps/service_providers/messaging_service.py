@@ -491,7 +491,7 @@ class TurnIOService(HttpMediaDownloadMixin, MessagingService):
 
     # Cold-start template for out-of-window sends. Read from the provider's
     # `config` JSON (MessagingProvider.config → TurnIOService(**config)) — set
-    # all four on the Turn.io provider row via Django admin/shell. Empty
+    # all four on the Turn.io provider form. Empty
     # namespace/name means "no template configured": out-of-window sends then
     # raise a clear error instead of failing obscurely at Turn.
     # `template_header_param` fills the template's single header variable

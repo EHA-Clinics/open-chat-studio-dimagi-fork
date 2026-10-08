@@ -8,8 +8,14 @@ This guide covers the configuration parameters for a Turn.io messaging provider 
 |-----------|-------|----------|----------------|
 | `auth_token` | Auth Token | Yes | All outbound calls to the Turn API |
 | `hmac_secret` | Webhook HMAC Secret | No | Verifying incoming webhook payload signatures |
+| `template_namespace` | Template Namespace | No* | Out-of-window template sends (with `template_name`) |
+| `template_name` | Template Name | No* | Out-of-window template sends (with `template_namespace`) |
+| `template_language` | Template Language | No | Default template language code, e.g. `en` or `ha` |
+| `template_header_param` | Template Header Text | No | Header variable for the template; blank omits the header |
 
 Both are stored as encrypted fields and obfuscated in the UI.
+
+\* Namespace and name must be set together. When both are blank, out-of-window sends raise a clear error instead of failing at Turn. Approve the template in Turn.io first; a single send can still override the language per participant.
 
 ## `hmac_secret` — Webhook Signature Verification
 

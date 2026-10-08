@@ -332,11 +332,61 @@ class TurnIOMessagingConfigForm(ObfuscatingMixin, ProviderTypeConfigForm):
             "webhooks must carry a matching X-Turn-Hook-Signature header or they are rejected."
         ),
     )
+    template_namespace = forms.CharField(
+        label=_("Template Namespace"),
+        required=False,
+        help_text=_(
+            "Optional. The namespace UUID of the approved Turn.io template used when the 24-hour "
+            "service window has expired. Find it on the template in your Turn.io dashboard."
+        ),
+    )
+    template_name = forms.CharField(
+        label=_("Template Name"),
+        required=False,
+        help_text=_(
+            "Optional. The name of the approved Turn.io template, e.g. 'refill_patient'. "
+            "Must be set together with the namespace."
+        ),
+    )
+    template_language = forms.CharField(
+        label=_("Template Language"),
+        required=False,
+        initial="en",
+        help_text=_(
+            "Default language code for the template, e.g. 'en' or 'ha'. A single send can still "
+            "override this per participant. Leave blank for 'en'."
+        ),
+    )
+    template_header_param = forms.CharField(
+        label=_("Template Header Text"),
+        required=False,
+        initial="AdhereBot",
+        help_text=_(
+            "Fills the template's single header variable. Leave blank to omit the header component "
+            "for templates without a header."
+        ),
+    )
+
+    def clean_template_namespace(self):
+        return (self.cleaned_data.get("template_namespace") or "").strip()
+
+    def clean_template_name(self):
+        return (self.cleaned_data.get("template_name") or "").strip()
+
+    def clean_template_language(self):
+        return (self.cleaned_data.get("template_language") or "").strip() or "en"
+
+    def clean_template_header_param(self):
+        return (self.cleaned_data.get("template_header_param") or "").strip()
 
     def clean(self):
         """Normalise hmac_secret so the stored value is always a string."""
         cleaned_data = super().clean()
         cleaned_data["hmac_secret"] = (cleaned_data.get("hmac_secret") or "").strip()
+        namespace = cleaned_data.get("template_namespace") or ""
+        name = cleaned_data.get("template_name") or ""
+        if bool(namespace) != bool(name):
+            raise forms.ValidationError(_("Template namespace and name must be set together, or both left blank."))
         return cleaned_data
 
 
